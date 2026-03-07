@@ -88,7 +88,51 @@ def compare_images(before_gray, aligned_after_gray):
 
     return score, diff
 
+def find_and_draw_damage(diff_image, aligned_after_color):
+    """
+    Takes the raw difference map, filters out the noise, finds the 
+    actual damage spots, and draws red bounding boxes around them.
+    """
+    print("[INFO] Highlighting damage...")
 
+    # 1. Thresholding (The Filter)
+    # SSIM makes identical areas WHITE and different areas DARK. 
+    # We use THRESH_BINARY_INV to flip this: Damage becomes WHITE, everything else BLACK.
+    # Otsu's method automatically calculates the best threshold value.
+    _, thresh = cv2.threshold(diff_image, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU)
+
+    # 2. Clean up the noise (Morphological Operations)
+    # Sometimes dust or slight shadows appear as tiny white dots. We 'open' the image 
+    # to erase tiny dots but keep the big scratches.
+    kernel = np.ones((5, 5), np.uint8)
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+
+    # 3. Find Contours (Trace the shapes)
+    # This finds the outlines of all the white blobs on our black mask.
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # Make a copy of the color image to draw on
+    output_image = aligned_after_color.copy()
+    damage_count = 0
+
+    # 4. Loop through the contours and draw boxes
+    for c in contours:
+        # Calculate the area of the contour
+        area = cv2.contourArea(c)
+        
+        # FILTER: If the area is too small (e.g., under 50 pixels), ignore it. 
+        # This prevents drawing boxes around specks of dust.
+        if area > 50:
+            # Get the coordinates for the bounding box
+            x, y, w, h = cv2.boundingRect(c)
+            
+            # Draw a RED rectangle (BGR format: 0, 0, 255) with a thickness of 2
+            cv2.rectangle(output_image, (x, y), (x + w, y + h), (0, 0, 255), 2)
+            damage_count += 1
+
+    print(f"[RESULT] Found {damage_count} distinct areas of damage.")
+    return output_image, thresh
+# --- SPRINT TESTING BLOCK ---
 # --- SPRINT TESTING BLOCK ---
 # --- SPRINT TESTING BLOCK ---
 if __name__ == "__main__":
@@ -98,7 +142,6 @@ if __name__ == "__main__":
     if not os.path.exists(img1_path) or not os.path.exists(img2_path):
         print("[WARNING] Missing test images.")
     else:
-        # Phase 1 & 2: Preprocess
         color_before, gray_before = preprocess_image(img1_path)
         color_after, gray_after = preprocess_image(img2_path)
 
@@ -109,10 +152,13 @@ if __name__ == "__main__":
             # Phase 4: Compare
             score, diff_image = compare_images(gray_before, aligned_gray)
 
-            # Show the results!
-            cv2.imshow("Original Before", gray_before)
-            cv2.imshow("Aligned After", aligned_gray)
-            cv2.imshow("Difference Map", diff_image)
+            # Phase 5 & 6: Find and Draw Damage
+            final_output, mask = find_and_draw_damage(diff_image, aligned_color)
+
+            # --- THE BIG REVEAL ---
+            cv2.imshow("1. Original Before", color_before)
+            cv2.imshow("2. The Mask (White = Damage)", mask)
+            cv2.imshow("3. Final Result (Damage Highlighted)", final_output)
             
             print("Press any key on the image windows to close them...")
             cv2.waitKey(0)
